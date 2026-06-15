@@ -42,6 +42,7 @@ export default function App() {
   return (
     <AuthProvider>
       <GlobalSettings />
+      <div id="debug-app-loaded" style={{ position: 'absolute', top: 0, left: 0, zIndex: 9999, background: 'green', color: 'white', padding: '10px' }}>App Component Rendered!</div>
       <Router>
         <Routes>
           <Route path="/" element={
@@ -61,6 +62,7 @@ export default function App() {
               <AdminDashboard />
             </ProtectedRoute>
           } />
+          <Route path="*" element={<div className="p-10 text-center"><h1>404: Page Not Found</h1><p>The requested route does not exist.</p></div>} />
         </Routes>
       </Router>
     </AuthProvider>
