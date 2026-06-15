@@ -1,0 +1,56 @@
+{
+  "entities": {
+    "Gem": {
+      "title": "Gem",
+      "description": "A gemstone in the inventory",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "origin": { "type": "string" },
+        "shape": { "type": "string" },
+        "dimensions": { "type": "string" },
+        "weight": { "type": "number", "description": "Carat weight" },
+        "treatment": { "type": "string" },
+        "price": { "type": "number" },
+        "imageUrl": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["name", "origin", "shape", "dimensions", "weight", "treatment", "price", "ownerId", "createdAt", "updatedAt"]
+    },
+    "Admin": {
+      "title": "Admin",
+      "description": "Authorized Admin User",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["email", "createdAt"]
+    },
+    "StoreSettings": {
+      "title": "Store Settings",
+      "description": "Store settings including the shared client password.",
+      "type": "object",
+      "properties": {
+        "clientPassword": { "type": "string" }
+      },
+      "required": ["clientPassword"]
+    }
+  },
+  "firestore": {
+    "/gems/{gemId}": {
+      "schema": { "$ref": "#/entities/Gem" },
+      "description": "Inventory of gems."
+    },
+    "/admins/{uid}": {
+      "schema": { "$ref": "#/entities/Admin" },
+      "description": "List of user IDs who have admin privileges."
+    },
+    "/settings/storefront": {
+      "schema": { "$ref": "#/entities/StoreSettings" },
+      "description": "The client access password and store settings."
+    }
+  }
+}
