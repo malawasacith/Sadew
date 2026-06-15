@@ -1,5 +1,5 @@
 {
-  "name": "lumina-gem-inventory",
+  "name": "Sadew Gem Inventory",
   "description": "A secure, password-protected supplier gem inventory and client storefront.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

@@ -9,9 +9,29 @@ import { compressImage } from '../lib/image';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
 
+const importableFields = [
+  { key: 'name', label: 'Name', required: true },
+  { key: 'gemType', label: 'Gem Type', required: true },
+  { key: 'origin', label: 'Origin', required: true },
+  { key: 'price', label: 'Price ($)', required: true },
+  { key: 'shape', label: 'Shape' },
+  { key: 'weight', label: 'Weight (ct)' },
+  { key: 'dimensions', label: 'Dimensions' },
+  { key: 'treatment', label: 'Treatment' },
+  { key: 'buyingPrice', label: 'Buying Price ($)' },
+  { key: 'salePercentage', label: 'Sale Percentage (%)' },
+  { key: 'status', label: 'Status' },
+  { key: 'basicColour', label: 'Basic Colour' },
+  { key: 'tradeColor', label: 'Trade Color' },
+  { key: 'cutGrade', label: 'Cut Grade' },
+  { key: 'supplier', label: 'Supplier' },
+  { key: 'imageUrl', label: 'Image URL' },
+  { key: 'videoUrl', label: 'Video URL' },
+];
+
 export function AdminDashboard() {
   const { user, signOut } = useAuth();
-  const [activeTab, setActiveTab] = useState<'inventory' | 'settings' | 'advanced'>('inventory');
+  const [activeTab, setActiveTab] = useState<'inventory' | 'settings' | 'advanced' | 'inquiries' | 'email'>('inventory');
   
   const [gems, setGems] = useState<Gem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -30,6 +50,10 @@ export function AdminDashboard() {
     buyingPrice: '',
     salePercentage: '',
     status: 'available',
+    basicColour: '',
+    tradeColor: '',
+    cutGrade: '' as 'Very good' | 'Good' | 'Ok' | '',
+    supplier: '',
     imageUrl: '',
     videoUrl: '',
     images: [] as string[]
@@ -40,6 +64,8 @@ export function AdminDashboard() {
   const [importing, setImporting] = useState(false);
   const [importProgress, setImportProgress] = useState(0);
   const [importStage, setImportStage] = useState('');
+  const [csvImportData, setCsvImportData] = useState<{headers: string[], rows: string[][] | null} | null>(null);
+  const [csvMapping, setCsvMapping] = useState<Record<string, string>>({});
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const inventoryImportRef = React.useRef<HTMLInputElement>(null);
   const settingsImportRef = React.useRef<HTMLInputElement>(null);
@@ -59,6 +85,7 @@ export function AdminDashboard() {
     aboutText: ''
   });
   const [savingSettings, setSavingSettings] = useState(false);
+  const [inquiries, setInquiries] = useState<any[]>([]);
 
   useEffect(() => {
     // Fetch Settings
@@ -92,7 +119,23 @@ export function AdminDashboard() {
         setLoading(false);
       }
     );
-    return () => unsub();
+    
+    // Fetch Inquiries
+    const iq = query(collection(db, 'inquiries'));
+    const unsubIq = onSnapshot(
+      iq,
+      (snapshot) => {
+        const fetched: any[] = [];
+        snapshot.forEach(doc => fetched.push({ id: doc.id, ...doc.data() }));
+        setInquiries(fetched.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)));
+      },
+      (error) => console.error("Error fetching inquiries", error)
+    );
+    
+    return () => {
+      unsub();
+      unsubIq();
+    };
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -106,12 +149,16 @@ export function AdminDashboard() {
       origin: formData.origin,
       shape: formData.shape,
       dimensions: formData.dimensions,
-      weight: Number(formData.weight),
+      weight: Number(String(formData.weight).replace(/,/g, '')),
       treatment: formData.treatment,
-      price: Number(formData.price),
-      buyingPrice: formData.buyingPrice ? Number(formData.buyingPrice) : null,
-      salePercentage: formData.status === 'on_sale' && formData.salePercentage ? Number(formData.salePercentage) : null,
+      price: Number(String(formData.price).replace(/,/g, '')),
+      buyingPrice: formData.buyingPrice ? Number(String(formData.buyingPrice).replace(/,/g, '')) : null,
+      salePercentage: formData.status === 'on_sale' && formData.salePercentage ? Number(String(formData.salePercentage).replace(/,/g, '')) : null,
       status: formData.status || 'available',
+      basicColour: formData.basicColour,
+      tradeColor: formData.tradeColor,
+      cutGrade: formData.cutGrade,
+      supplier: formData.supplier,
       imageUrl: formData.imageUrl || '',
       videoUrl: formData.videoUrl || '',
       images: formData.images,
@@ -134,7 +181,7 @@ export function AdminDashboard() {
       }
       setIsFormOpen(false);
       setEditingGem(null);
-      setFormData({ name: '', gemType: '', origin: '', shape: '', dimensions: '', weight: '', treatment: '', price: '', buyingPrice: '', salePercentage: '', status: 'available', imageUrl: '', videoUrl: '', images: [] });
+      setFormData({ name: '', gemType: '', origin: '', shape: '', dimensions: '', weight: '', treatment: '', price: '', buyingPrice: '', salePercentage: '', status: 'available', basicColour: '', tradeColor: '', cutGrade: '', supplier: '', imageUrl: '', videoUrl: '', images: [] });
     } catch (error) {
       if (editingGem) {
         handleFirestoreError(error, OperationType.UPDATE, `gems/${editingGem.id}`);
@@ -158,6 +205,10 @@ export function AdminDashboard() {
       buyingPrice: gem.buyingPrice ? String(gem.buyingPrice) : '',
       salePercentage: gem.salePercentage ? String(gem.salePercentage) : '',
       status: gem.status || 'available',
+      basicColour: gem.basicColour || '',
+      tradeColor: gem.tradeColor || '',
+      cutGrade: gem.cutGrade || '',
+      supplier: gem.supplier || '',
       imageUrl: gem.imageUrl || '',
       videoUrl: gem.videoUrl || '',
       images: gem.images || []
@@ -207,91 +258,141 @@ export function AdminDashboard() {
 
   const handleCSVUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !user) return;
+    if (!file) return;
 
-    setImporting(true);
     try {
       const text = await file.text();
       const rows = text.split(/\r?\n/).filter(row => row.trim() !== '');
       if (rows.length < 2) {
         alert("The CSV file doesn't seem to contain data.");
-        setImporting(false);
-        return;
-      }
-      
-      const headers = parseCSVRow(rows[0]).map(h => h.toLowerCase().trim().replace(/[^a-z0-9]/g, ''));
-      const dataRows = rows.slice(1);
-
-      const errors: string[] = [];
-      if (!headers.includes('name')) errors.push("Missing required column: Name");
-      if (!headers.includes('price')) errors.push("Missing required column: Price");
-      if (!headers.includes('origin')) errors.push("Missing required column: Origin");
-      if (!headers.includes('gemtype') && !headers.includes('type')) errors.push("Missing required column: Gem Type");
-
-      if (errors.length === 0) {
-        for (let i = 0; i < dataRows.length; i++) {
-          const values = parseCSVRow(dataRows[i]);
-          const item: any = {};
-          for (let j = 0; j < headers.length; j++) {
-            item[headers[j]] = values[j] || '';
-          }
-
-          if (!item.name?.trim()) errors.push(`Row ${i + 2}: Name is missing.`);
-          if (!item.price?.trim() || isNaN(parseFloat(item.price))) errors.push(`Row ${i + 2}: Price is missing or invalid.`);
-          if (!item.origin?.trim()) errors.push(`Row ${i + 2}: Origin is missing.`);
-          if (!item.gemtype?.trim() && !item.type?.trim()) errors.push(`Row ${i + 2}: Gem Type is missing.`);
-        }
-      }
-
-      if (errors.length > 0) {
-        alert("CSV Validation Failed:\\n" + errors.slice(0, 10).join("\\n") + (errors.length > 10 ? "\\n...and more" : ""));
-        setImporting(false);
         if (fileInputRef.current) fileInputRef.current.value = '';
         return;
       }
-
-      for (let k = 0; k < dataRows.length; k++) {
-        const rowText = dataRows[k];
-        const values = parseCSVRow(rowText);
-        const item: any = {};
-        for (let i = 0; i < headers.length; i++) {
-          item[headers[i]] = values[i] || '';
+      
+      const headers = parseCSVRow(rows[0]).map(h => h.trim());
+      const dataRows = rows.slice(1).map(r => parseCSVRow(r));
+      
+      const newMapping: Record<string, string> = {};
+      const normalizedHeaders = headers.map(h => h.toLowerCase().trim().replace(/[^a-z0-9]/g, ''));
+      
+      importableFields.forEach(f => {
+        const fieldNorm = f.key.toLowerCase();
+        let matchIdx = normalizedHeaders.findIndex(nh => nh === fieldNorm);
+        if (matchIdx === -1 && f.key === 'gemType') matchIdx = normalizedHeaders.findIndex(nh => nh === 'type' || nh.includes('type'));
+        if (matchIdx === -1) matchIdx = normalizedHeaders.findIndex(nh => nh.includes(fieldNorm));
+        
+        if (matchIdx !== -1) {
+          newMapping[f.key] = String(matchIdx);
         }
+      });
 
-        // Must have at least a name
-        if (!item.name) continue;
-
-        const price = parseFloat(item.price);
-        
-        await addDoc(collection(db, 'gems'), {
-          name: item.name,
-          gemType: item.gemtype || item.type || '',
-          origin: item.origin || '',
-          shape: item.shape || '',
-          dimensions: item.dimensions || '',
-          weight: parseFloat(item.weight) || 0,
-          treatment: item.treatment || '',
-          price: isNaN(price) ? 0 : price,
-          buyingPrice: item.buyingprice ? parseFloat(item.buyingprice) : null,
-          salePercentage: item.salepercentage ? parseFloat(item.salepercentage) : null,
-          status: item.status && ['available', 'on_sale', 'sold'].includes(item.status.toLowerCase()) ? item.status.toLowerCase() : 'available',
-          imageUrl: item.imageurl || '',
-          videoUrl: item.videourl || '',
-          images: [],
-          ownerId: user.uid,
-          createdAt: Date.now(),
-          updatedAt: Date.now()
-        });
-        
-        setImportProgress(Math.round(((k + 1) / dataRows.length) * 100));
-        setImportStage(`Importing ${k + 1} of ${dataRows.length}`);
-      }
-      alert("Import completed successfully!");
+      setCsvMapping(newMapping);
+      setCsvImportData({ headers, rows: dataRows });
     } catch (err) {
       console.error(err);
-      alert("Error importing data.");
+      alert("Error reading CSV.");
     } finally {
       if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const executeCSVImport = async () => {
+    if (!csvImportData) return;
+    const ownerId = user?.uid || 'demo-admin-user';
+
+    // Validate required fields mapping
+    const missingReq = importableFields.filter(f => f.required && csvMapping[f.key] === undefined);
+    if (missingReq.length > 0) {
+      alert(`Missing mapping for required fields: ${missingReq.map(f => f.label).join(', ')}`);
+      return;
+    }
+
+    setImporting(true);
+    setImportProgress(0);
+    setImportStage('Starting import...');
+    
+    try {
+      const numRows = csvImportData.rows.length;
+      let successCount = 0;
+      let errorCount = 0;
+      
+      for (let i = 0; i < numRows; i++) {
+        const values = csvImportData.rows[i];
+        
+        // Build gemData based on mapping
+        const item: any = {};
+        importableFields.forEach(f => {
+          const mappedIdxStr = csvMapping[f.key];
+          if (mappedIdxStr !== undefined && mappedIdxStr !== '') {
+            const idx = parseInt(mappedIdxStr, 10);
+            if (!isNaN(idx) && idx >= 0 && idx < values.length) {
+              item[f.key] = values[idx];
+            }
+          }
+        });
+
+        if (!item.name || !item.name.trim()) {
+          errorCount++;
+          continue; // Skip without name
+        }
+
+        const price = item.price ? parseFloat(String(item.price).replace(/,/g, '')) : 0;
+        
+        // Let React update the UI by pushing addDoc to next tick slightly or yielding
+        if (i % 5 === 0) {
+            await new Promise(resolve => setTimeout(resolve, 10)); // Yield to allow progress bar to repaint
+        }
+
+        const gemNameStr = item.name.trim();
+
+        const updateData: any = {
+          name: gemNameStr,
+          gemType: item.gemType?.trim() || '',
+          origin: item.origin?.trim() || '',
+          shape: item.shape?.trim() || '',
+          dimensions: item.dimensions?.trim() || '',
+          weight: item.weight ? parseFloat(String(item.weight).replace(/,/g, '')) : 0,
+          treatment: item.treatment?.trim() || '',
+          price: isNaN(price) ? 0 : price,
+          buyingPrice: item.buyingPrice ? parseFloat(String(item.buyingPrice).replace(/,/g, '')) : null,
+          salePercentage: item.salePercentage ? parseFloat(String(item.salePercentage).replace(/,/g, '')) : null,
+          status: item.status && ['available', 'on_sale', 'sold'].includes(item.status.toLowerCase().trim()) ? item.status.toLowerCase().trim() : 'available',
+          basicColour: item.basicColour?.trim() || '',
+          tradeColor: item.tradeColor?.trim() || '',
+          cutGrade: item.cutGrade?.trim() || '',
+          supplier: item.supplier?.trim() || '',
+          updatedAt: Date.now()
+        };
+
+        if (item.imageUrl?.trim()) updateData.imageUrl = item.imageUrl.trim();
+        if (item.videoUrl?.trim()) updateData.videoUrl = item.videoUrl.trim();
+
+        const existingGem = gems.find(g => g.name.toLowerCase() === gemNameStr.toLowerCase());
+
+        if (existingGem) {
+          await setDoc(doc(db, 'gems', existingGem.id), updateData, { merge: true });
+        } else {
+          updateData.images = [];
+          updateData.ownerId = ownerId;
+          updateData.createdAt = Date.now();
+          if (!updateData.imageUrl) updateData.imageUrl = '';
+          if (!updateData.videoUrl) updateData.videoUrl = '';
+          await addDoc(collection(db, 'gems'), updateData);
+        }
+        
+        successCount++;
+        setImportProgress(Math.round(((i + 1) / numRows) * 100));
+        setImportStage(`Importing ${i + 1} of ${numRows}`);
+      }
+      
+      setTimeout(() => {
+        alert(`Import completed! Successfully imported ${successCount} items. ${errorCount > 0 ? `Skipped ${errorCount} invalid rows.` : ''}`);
+        setCsvImportData(null);
+        setImporting(false);
+      }, 100);
+    } catch (err) {
+      console.error('Import error:', err);
+      alert("Error importing data.");
       setImporting(false);
     }
   };
@@ -438,7 +539,8 @@ export function AdminDashboard() {
 
   const handleRestoreInventory = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !user) return;
+    if (!file) return;
+    const ownerId = user?.uid || 'demo-admin-user';
     
     setImporting(true);
     try {
@@ -468,7 +570,7 @@ export function AdminDashboard() {
         
         if (!item.id || !item.name) continue;
         
-        const price = parseFloat(item.price);
+        const price = item.price ? parseFloat(String(item.price).replace(/,/g, '')) : 0;
         const docId = item.id;
         
         const updateData: any = {
@@ -477,11 +579,11 @@ export function AdminDashboard() {
           origin: item.origin || '',
           shape: item.shape || '',
           dimensions: item.dimensions || '',
-          weight: parseFloat(item.weight) || 0,
+          weight: item.weight ? parseFloat(String(item.weight).replace(/,/g, '')) : 0,
           treatment: item.treatment || '',
           price: isNaN(price) ? 0 : price,
-          buyingPrice: item.buyingPrice ? parseFloat(item.buyingPrice) : null,
-          salePercentage: item.salePercentage ? parseFloat(item.salePercentage) : null,
+          buyingPrice: item.buyingPrice ? parseFloat(String(item.buyingPrice).replace(/,/g, '')) : null,
+          salePercentage: item.salePercentage ? parseFloat(String(item.salePercentage).replace(/,/g, '')) : null,
           status: item.status || 'available',
           imageUrl: item.imageUrl || '',
           videoUrl: item.videoUrl || '',
@@ -490,7 +592,7 @@ export function AdminDashboard() {
         
         // Only set ownerId and createdAt if they are provided, typically export has them
         if (item.createdAt) updateData.createdAt = parseInt(item.createdAt) || Date.now();
-        if (user.uid) updateData.ownerId = user.uid;
+        updateData.ownerId = ownerId;
 
         await setDoc(doc(db, 'gems', docId), updateData, { merge: true });
         
@@ -529,6 +631,44 @@ export function AdminDashboard() {
 
   return (
     <>
+      {csvImportData && !importing && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg p-6 max-w-2xl w-full max-h-[90vh] flex flex-col shadow-xl">
+            <h3 className="text-xl font-semibold text-slate-900 mb-2">Map CSV Columns</h3>
+            <p className="text-sm text-slate-500 mb-6">Select which column from your CSV corresponds to each property.</p>
+            
+            <div className="flex-1 overflow-y-auto min-h-0 border border-slate-200 rounded-md p-4 mb-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {importableFields.map(field => (
+                  <div key={field.key} className="flex flex-col">
+                    <label className="text-sm font-medium text-slate-700 mb-1 whitespace-nowrap overflow-hidden text-ellipsis">
+                      {field.label} {field.required && <span className="text-red-500">*</span>}
+                    </label>
+                    <select
+                      className="h-9 px-3 rounded-md border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                      value={csvMapping[field.key] || ""}
+                      onChange={(e) => setCsvMapping(prev => ({...prev, [field.key]: e.target.value}))}
+                    >
+                      <option value="">-- Ignore --</option>
+                      {csvImportData.headers.map((header, idx) => (
+                        <option key={idx} value={String(idx)}>{header}</option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
+              </div>
+            </div>
+            
+            <div className="flex justify-end gap-3 pt-4 border-t border-slate-100 shrink-0">
+              <Button variant="outline" onClick={() => {
+                setCsvImportData(null);
+                if (fileInputRef.current) fileInputRef.current.value = '';
+              }}>Cancel</Button>
+              <Button onClick={executeCSVImport}>Start Import</Button>
+            </div>
+          </div>
+        </div>
+      )}
       {importing && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center">
           <div className="bg-white rounded-lg p-6 max-w-sm w-full mx-4 shadow-xl">
@@ -583,6 +723,18 @@ export function AdminDashboard() {
             Store Appearance
           </button>
           <button 
+            className={`py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === 'inquiries' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-900 hover:border-slate-300'}`}
+            onClick={() => setActiveTab('inquiries')}
+          >
+            Inquiries
+          </button>
+          <button 
+            className={`py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === 'email' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-900 hover:border-slate-300'}`}
+            onClick={() => setActiveTab('email')}
+          >
+            Email Settings
+          </button>
+          <button 
             className={`py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === 'advanced' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-900 hover:border-slate-300'}`}
             onClick={() => setActiveTab('advanced')}
           >
@@ -635,6 +787,7 @@ export function AdminDashboard() {
                 <tr>
                   <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Gem</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Specs</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Supplier</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Price</th>
                   <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Actions</th>
                 </tr>
@@ -673,6 +826,9 @@ export function AdminDashboard() {
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
                       <div>{gem.weight} ct • {gem.shape}</div>
                       <div className="text-xs mt-0.5">{gem.dimensions}</div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
+                      {gem.supplier || '-'}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900">
                       <div>${(gem.price || 0).toLocaleString()}</div>
@@ -879,6 +1035,126 @@ export function AdminDashboard() {
                 </div>
               </form>
             </div>
+          ) : activeTab === 'inquiries' ? (
+            <div className="bg-white rounded-lg border border-slate-200 shadow-sm p-6 lg:max-w-4xl">
+              <h2 className="text-xl font-semibold mb-6">Customer Inquiries</h2>
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-slate-200">
+                  <thead className="bg-slate-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Date</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Customer</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Contact</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Item / Offer</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Message</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-slate-200">
+                    {inquiries.map((iq) => (
+                      <tr key={iq.id}>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
+                          {new Date(iq.createdAt || Date.now()).toLocaleDateString()}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm font-medium text-slate-900">{iq.name}</div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
+                          {iq.phone}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900">
+                          <div>{iq.itemName}</div>
+                          {iq.offeringPrice && <div className="text-xs text-indigo-600 font-medium">Offered: ${iq.offeringPrice}</div>}
+                        </td>
+                        <td className="px-6 py-4 text-sm text-slate-500 max-w-sm">
+                          <div className="truncate" title={iq.message}>{iq.message || '-'}</div>
+                        </td>
+                      </tr>
+                    ))}
+                    {inquiries.length === 0 && (
+                      <tr>
+                        <td colSpan={5} className="px-6 py-8 text-center text-sm text-slate-500">
+                          No inquiries found.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : activeTab === 'email' ? (
+            <div className="bg-white rounded-lg border border-slate-200 shadow-sm p-6 lg:max-w-2xl">
+              <h2 className="text-xl font-semibold mb-6">Email API Settings</h2>
+              
+              <form onSubmit={handleSaveSettings} className="space-y-6">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-3">Email Method</label>
+                  <div className="space-y-3">
+                    <label className="flex items-start gap-3 cursor-pointer">
+                      <input 
+                        type="radio" 
+                        name="emailMethod"
+                        value="user_client"
+                        checked={settings.emailMethod !== 'self_hosted'}
+                        onChange={() => setSettings({...settings, emailMethod: 'user_client'})}
+                        className="mt-1 w-4 h-4 text-indigo-600 focus:ring-indigo-500 border-slate-300"
+                      />
+                      <div>
+                        <span className="block text-sm font-medium text-slate-900">User's Default Email Client (mailto)</span>
+                        <span className="block text-sm text-slate-500">Opens the customer's email app (e.g. Outlook, Mail, Gmail) to compose the message. No setup required.</span>
+                      </div>
+                    </label>
+                    <label className="flex items-start gap-3 cursor-pointer">
+                      <input 
+                        type="radio" 
+                        name="emailMethod"
+                        value="self_hosted"
+                        checked={settings.emailMethod === 'self_hosted'}
+                        onChange={() => setSettings({...settings, emailMethod: 'self_hosted'})}
+                        className="mt-1 w-4 h-4 text-indigo-600 focus:ring-indigo-500 border-slate-300"
+                      />
+                      <div>
+                        <span className="block text-sm font-medium text-slate-900">Self-hosted SMTP API</span>
+                        <span className="block text-sm text-slate-500">Send customer inquiries directly through your own SMTP server.</span>
+                      </div>
+                    </label>
+                  </div>
+                </div>
+
+                {settings.emailMethod === 'self_hosted' && (
+                  <div className="border-t border-slate-200 pt-6">
+                    <h3 className="text-sm font-medium text-slate-900 mb-4">SMTP Configuration</h3>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="sm:col-span-2">
+                        <label className="block text-sm font-medium text-slate-700 mb-1">SMTP Host</label>
+                        <Input value={settings.smtpHost || ''} onChange={e => setSettings({...settings, smtpHost: e.target.value})} placeholder="e.g. smtp.gmail.com" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">SMTP Port</label>
+                        <Input value={settings.smtpPort || ''} onChange={e => setSettings({...settings, smtpPort: e.target.value})} placeholder="e.g. 465 or 587" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">SMTP User / Email</label>
+                        <Input type="email" value={settings.smtpUser || ''} onChange={e => setSettings({...settings, smtpUser: e.target.value})} placeholder="you@domain.com" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">SMTP Password</label>
+                        <Input type="password" value={settings.smtpPassword || ''} onChange={e => setSettings({...settings, smtpPassword: e.target.value})} placeholder="App password or standard password" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">From Email (Optional)</label>
+                        <Input type="email" value={settings.smtpFrom || ''} onChange={e => setSettings({...settings, smtpFrom: e.target.value})} placeholder="noreply@domain.com" />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="border-t border-slate-200 pt-6">
+                  <Button type="submit" disabled={savingSettings} className="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-700 text-white">
+                    {savingSettings ? 'Saving...' : 'Save Email Settings'}
+                  </Button>
+                </div>
+              </form>
+            </div>
           ) : (
             <div className="bg-white rounded-lg border border-slate-200 shadow-sm p-6 lg:max-w-2xl">
               <h2 className="text-xl font-semibold mb-6">Advanced Settings</h2>
@@ -960,125 +1236,12 @@ export function AdminDashboard() {
         {activeTab === 'inventory' && isFormOpen && (
           <aside className="w-full lg:w-96 shrink-0">
             <div className="bg-white p-6 rounded-lg border border-slate-200 shadow-sm sticky top-24">
-              <h3 className="text-lg font-semibold mb-6">{editingGem ? 'Edit Gem Details' : 'Add New Gem'}</h3>
               <form onSubmit={handleSubmit} className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-medium text-slate-500 mb-1">Name</label>
-                    <Input required value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} placeholder="e.g. Royal Blue Sapphire" />
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-lg font-semibold">{editingGem ? 'Edit Gem Details' : 'Add New Gem'}</h3>
+                  <div className="flex gap-2">
+                    <Button type="submit" size="sm" className="text-white bg-indigo-600 hover:bg-indigo-700">{editingGem ? 'Save' : 'Add'}</Button>
                   </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-500 mb-1">Gem Type</label>
-                    <Input list="gemTypes" value={formData.gemType} onChange={e => setFormData({...formData, gemType: e.target.value})} placeholder="e.g. Sapphire, Ruby, Emerald" />
-                    <datalist id="gemTypes">
-                      <option value="Sapphire" />
-                      <option value="Ruby" />
-                      <option value="Emerald" />
-                      <option value="Diamond" />
-                      <option value="Aquamarine" />
-                      <option value="Spinel" />
-                      <option value="Garnet" />
-                      <option value="Tourmaline" />
-                      <option value="Amethyst" />
-                      <option value="Topaz" />
-                      <option value="Zircon" />
-                      <option value="Morganite" />
-                    </datalist>
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-medium text-slate-500 mb-1">Origin</label>
-                    <Input list="origins" required value={formData.origin} onChange={e => setFormData({...formData, origin: e.target.value})} placeholder="e.g. Ceylon" />
-                    <datalist id="origins">
-                      <option value="Ceylon (Sri Lanka)" />
-                      <option value="Burma (Myanmar)" />
-                      <option value="Madagascar" />
-                      <option value="Colombia" />
-                      <option value="Zambia" />
-                      <option value="Brazil" />
-                      <option value="Tanzania" />
-                      <option value="Mozambique" />
-                      <option value="Kenya" />
-                      <option value="Afghanistan" />
-                      <option value="Pakistan" />
-                      <option value="Russia" />
-                      <option value="Vietnam" />
-                      <option value="Ethiopia" />
-                    </datalist>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-500 mb-1">Shape</label>
-                    <Input list="shapes" required value={formData.shape} onChange={e => setFormData({...formData, shape: e.target.value})} placeholder="e.g. Oval Cushion" />
-                    <datalist id="shapes">
-                      <option value="Oval" />
-                      <option value="Cushion" />
-                      <option value="Round" />
-                      <option value="Emerald" />
-                      <option value="Pear" />
-                      <option value="Princess" />
-                      <option value="Radiant" />
-                      <option value="Asscher" />
-                      <option value="Heart" />
-                      <option value="Marquise" />
-                      <option value="Octagon" />
-                      <option value="Trillion" />
-                      <option value="Baguette" />
-                      <option value="Cabochon" />
-                    </datalist>
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-medium text-slate-500 mb-1">Weight (ct)</label>
-                    <Input required type="number" step="0.01" value={formData.weight} onChange={e => setFormData({...formData, weight: e.target.value})} placeholder="e.g. 2.5" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-500 mb-1">Selling Price ($)</label>
-                    <Input required type="number" min="0" value={formData.price} onChange={e => setFormData({...formData, price: e.target.value})} placeholder="e.g. 4500" />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Buying Price ($) - Only visible to Admin</label>
-                  <Input type="number" min="0" value={formData.buyingPrice} onChange={e => setFormData({...formData, buyingPrice: e.target.value})} placeholder="e.g. 3000" />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Status</label>
-                  <select 
-                    value={formData.status} 
-                    onChange={e => setFormData({...formData, status: e.target.value as 'available'|'on_sale'|'sold'})}
-                    className="w-full h-10 px-3 rounded-md border border-slate-300 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent transition-colors"
-                  >
-                    <option value="available">Available</option>
-                    <option value="on_sale">On Sale</option>
-                    <option value="sold">Sold</option>
-                  </select>
-                </div>
-                {formData.status === 'on_sale' && (
-                  <div>
-                    <label className="block text-xs font-medium text-slate-500 mb-1">Sale Percentage (%)</label>
-                    <Input type="number" min="0" max="100" value={formData.salePercentage} onChange={e => setFormData({...formData, salePercentage: e.target.value})} placeholder="e.g. 15" />
-                  </div>
-                )}
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Dimensions</label>
-                  <Input required value={formData.dimensions} onChange={e => setFormData({...formData, dimensions: e.target.value})} placeholder="e.g. 8.2 x 6.4 x 4.1 mm" />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Treatment Status</label>
-                  <Input list="treatments" required value={formData.treatment} onChange={e => setFormData({...formData, treatment: e.target.value})} placeholder="e.g. Unheated / Untreated" />
-                  <datalist id="treatments">
-                    <option value="Unheated / Untreated" />
-                    <option value="Heated" />
-                    <option value="Minor Oil" />
-                    <option value="Moderate Oil" />
-                    <option value="Significant Oil" />
-                    <option value="Glass Filled" />
-                    <option value="Irradiated" />
-                    <option value="Diffusion" />
-                    <option value="Dyeing" />
-                    <option value="Fracture Filled" />
-                  </datalist>
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-slate-500 mb-1">Image URL (Optional)</label>
@@ -1090,10 +1253,12 @@ export function AdminDashboard() {
                 </div>
                 
                 <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Local Media (Up to 10)</label>
+                  <label className="block text-xs font-medium text-slate-500 mb-1">Media Gallery (Up to 10)</label>
                   {formData.images.length > 0 && (
                     <div className="flex gap-2 mb-2 flex-wrap">
-                      {formData.images.map((img, idx) => (
+                      {formData.images.map((img, idx) => {
+                        const isVideo = img.startsWith('data:video') || img.includes('.mp4') || img.includes('.webm') || img.includes('/video');
+                        return (
                         <div 
                           key={idx} 
                           draggable
@@ -1118,7 +1283,7 @@ export function AdminDashboard() {
                           onDragEnd={() => setDraggedImageIdx(null)}
                           className="relative w-16 h-16 rounded border border-slate-200 overflow-hidden cursor-move bg-slate-900"
                         >
-                          {img.startsWith('data:video') ? (
+                          {isVideo ? (
                             <video src={img} className="w-full h-full object-cover" />
                           ) : (
                             <img src={img} alt={`Preview ${idx}`} className="w-full h-full object-cover" />
@@ -1131,25 +1296,258 @@ export function AdminDashboard() {
                             <X className="h-3 w-3" />
                           </button>
                         </div>
-                      ))}
+                      )})}
                     </div>
                   )}
                   {formData.images.length < 10 && (
-                    <div className="relative">
-                      <input 
-                        type="file" 
-                        multiple 
-                        accept="image/*,video/*" 
-                        onChange={handleImageUpload} 
-                        disabled={uploadingImages}
-                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
-                      />
-                      <Button type="button" variant="outline" className="w-full gap-2 pointer-events-none" disabled={uploadingImages}>
-                        <Upload className="h-4 w-4" />
-                        {uploadingImages ? 'Processing...' : `Upload Media (${10 - formData.images.length} remaining)`}
-                      </Button>
+                    <div className="space-y-2">
+                        <div className="relative">
+                          <input 
+                            type="file" 
+                            multiple 
+                            accept="image/*,video/*" 
+                            onChange={handleImageUpload} 
+                            disabled={uploadingImages}
+                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
+                          />
+                          <Button type="button" variant="outline" className="w-full gap-2 pointer-events-none" disabled={uploadingImages}>
+                            <Upload className="h-4 w-4" />
+                            {uploadingImages ? 'Processing...' : `Upload Local Media (${10 - formData.images.length} remaining)`}
+                          </Button>
+                        </div>
+                        <div className="flex gap-2">
+                           <Input id="new-media-url" type="url" placeholder="Add external Image/Video URL" className="flex-1" />
+                           <Button type="button" variant="outline" onClick={() => {
+                              const input = document.getElementById('new-media-url') as HTMLInputElement;
+                              const url = input?.value?.trim();
+                              if (url && formData.images.length < 10) {
+                                  setFormData(prev => ({...prev, images: [...prev.images, url]}));
+                                  input.value = '';
+                              }
+                           }}>Add URL</Button>
+                        </div>
                     </div>
                   )}
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-500 mb-1">Name</label>
+                    <Input value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} placeholder="e.g. Royal Blue Sapphire" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-500 mb-1">Gem Type</label>
+                    <Input list="gemTypes" value={formData.gemType} onChange={e => setFormData({...formData, gemType: e.target.value})} placeholder="e.g. Sapphire, Ruby, Emerald" />
+                    <datalist id="gemTypes">
+                      <option value="Sapphire" />
+                      <option value="Ruby" />
+                      <option value="Emerald" />
+                      <option value="Diamond" />
+                      <option value="Aquamarine" />
+                      <option value="Spinel" />
+                      <option value="Garnet" />
+                      <option value="Tourmaline" />
+                      <option value="Amethyst" />
+                      <option value="Topaz" />
+                      <option value="Zircon" />
+                      <option value="Morganite" />
+                    </datalist>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-500 mb-1">Origin</label>
+                    <Input list="origins" value={formData.origin} onChange={e => setFormData({...formData, origin: e.target.value})} placeholder="e.g. Ceylon" />
+                    <datalist id="origins">
+                      <option value="Ceylon (Sri Lanka)" />
+                      <option value="Burma (Myanmar)" />
+                      <option value="Madagascar" />
+                      <option value="Colombia" />
+                      <option value="Zambia" />
+                      <option value="Brazil" />
+                      <option value="Tanzania" />
+                      <option value="Mozambique" />
+                      <option value="Kenya" />
+                      <option value="Afghanistan" />
+                      <option value="Pakistan" />
+                      <option value="Russia" />
+                      <option value="Vietnam" />
+                      <option value="Ethiopia" />
+                    </datalist>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-500 mb-1">Shape</label>
+                    <Input list="shapes" value={formData.shape} onChange={e => setFormData({...formData, shape: e.target.value})} placeholder="e.g. Oval Cushion" />
+                    <datalist id="shapes">
+                      <option value="Oval" />
+                      <option value="Cushion" />
+                      <option value="Round" />
+                      <option value="Emerald" />
+                      <option value="Pear" />
+                      <option value="Princess" />
+                      <option value="Radiant" />
+                      <option value="Asscher" />
+                      <option value="Heart" />
+                      <option value="Marquise" />
+                      <option value="Octagon" />
+                      <option value="Trillion" />
+                      <option value="Baguette" />
+                      <option value="Cabochon" />
+                    </datalist>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-500 mb-1">Weight (ct)</label>
+                    <Input type="text" inputMode="decimal" value={formData.weight} onChange={e => setFormData({...formData, weight: e.target.value})} placeholder="e.g. 2.5" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-500 mb-1">Selling Price ($)</label>
+                    <Input type="text" inputMode="decimal" value={formData.price} onChange={e => setFormData({...formData, price: e.target.value})} placeholder="e.g. 4500" />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 mb-1">Buying Price ($) - Only visible to Admin</label>
+                  <Input type="text" inputMode="decimal" value={formData.buyingPrice} onChange={e => setFormData({...formData, buyingPrice: e.target.value})} placeholder="e.g. 3000" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 mb-2">Status</label>
+                  <div className="flex flex-wrap gap-4">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input 
+                        type="radio" 
+                        name="status"
+                        value="available"
+                        checked={formData.status === 'available'}
+                        onChange={e => setFormData({...formData, status: e.target.value as 'available'|'on_sale'|'sold'})}
+                        className="w-4 h-4 text-indigo-600 focus:ring-indigo-500 border-slate-300"
+                      />
+                      <span className="text-sm text-slate-700">Available</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input 
+                        type="radio" 
+                        name="status"
+                        value="on_sale"
+                        checked={formData.status === 'on_sale'}
+                        onChange={e => setFormData({...formData, status: e.target.value as 'available'|'on_sale'|'sold'})}
+                        className="w-4 h-4 text-indigo-600 focus:ring-indigo-500 border-slate-300"
+                      />
+                      <span className="text-sm text-slate-700">On Sale</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input 
+                        type="radio" 
+                        name="status"
+                        value="sold"
+                        checked={formData.status === 'sold'}
+                        onChange={e => setFormData({...formData, status: e.target.value as 'available'|'on_sale'|'sold'})}
+                        className="w-4 h-4 text-indigo-600 focus:ring-indigo-500 border-slate-300"
+                      />
+                      <span className="text-sm text-slate-700">Sold</span>
+                    </label>
+                  </div>
+                </div>
+                {formData.status === 'on_sale' && (
+                  <div>
+                    <label className="block text-xs font-medium text-slate-500 mb-1">Sale Percentage (%)</label>
+                    <Input type="text" inputMode="decimal" value={formData.salePercentage} onChange={e => setFormData({...formData, salePercentage: e.target.value})} placeholder="e.g. 15" />
+                  </div>
+                )}
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 mb-1">Dimensions</label>
+                  <Input value={formData.dimensions} onChange={e => setFormData({...formData, dimensions: e.target.value})} placeholder="e.g. 8.2 x 6.4 x 4.1 mm" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 mb-1">Treatment Status</label>
+                  <Input list="treatments" value={formData.treatment} onChange={e => setFormData({...formData, treatment: e.target.value})} placeholder="e.g. Unheated / Untreated" />
+                  <datalist id="treatments">
+                    <option value="Unheated / Untreated" />
+                    <option value="Heated" />
+                    <option value="Minor Oil" />
+                    <option value="Moderate Oil" />
+                    <option value="Significant Oil" />
+                    <option value="Glass Filled" />
+                    <option value="Irradiated" />
+                    <option value="Diffusion" />
+                    <option value="Dyeing" />
+                    <option value="Fracture Filled" />
+                  </datalist>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 mb-1">Basic Colour</label>
+                  <Input value={formData.basicColour || ''} onChange={e => setFormData({...formData, basicColour: e.target.value})} placeholder="e.g. Blue" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 mb-1">Trade Color</label>
+                  <Input value={formData.tradeColor || ''} onChange={e => setFormData({...formData, tradeColor: e.target.value})} placeholder="e.g. Cornflower Blue" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 mb-2">Cut Grade</label>
+                  <div className="flex flex-wrap gap-4">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input 
+                        type="radio" 
+                        name="cutGrade"
+                        value=""
+                        checked={!formData.cutGrade}
+                        onChange={e => setFormData({...formData, cutGrade: e.target.value as any})}
+                        className="w-4 h-4 text-indigo-600 focus:ring-indigo-500 border-slate-300"
+                      />
+                      <span className="text-sm text-slate-700">None</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input 
+                        type="radio" 
+                        name="cutGrade"
+                        value="Very good"
+                        checked={formData.cutGrade === 'Very good'}
+                        onChange={e => setFormData({...formData, cutGrade: e.target.value as any})}
+                        className="w-4 h-4 text-indigo-600 focus:ring-indigo-500 border-slate-300"
+                      />
+                      <span className="text-sm text-slate-700">Very good</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input 
+                        type="radio" 
+                        name="cutGrade"
+                        value="Good"
+                        checked={formData.cutGrade === 'Good'}
+                        onChange={e => setFormData({...formData, cutGrade: e.target.value as any})}
+                        className="w-4 h-4 text-indigo-600 focus:ring-indigo-500 border-slate-300"
+                      />
+                      <span className="text-sm text-slate-700">Good</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input 
+                        type="radio" 
+                        name="cutGrade"
+                        value="Ok"
+                        checked={formData.cutGrade === 'Ok'}
+                        onChange={e => setFormData({...formData, cutGrade: e.target.value as any})}
+                        className="w-4 h-4 text-indigo-600 focus:ring-indigo-500 border-slate-300"
+                      />
+                      <span className="text-sm text-slate-700">Ok</span>
+                    </label>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 mb-1">Supplier</label>
+                  <select 
+                    value={formData.supplier || ''} 
+                    onChange={e => setFormData({...formData, supplier: e.target.value})}
+                    className="w-full h-10 px-3 rounded-md border border-slate-300 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent transition-colors"
+                  >
+                    <option value="">Select supplier...</option>
+                    <option value="SG/SEW">Sadew Gem Mr.Lal (SG/SEW)</option>
+                    <option value="SG/LAL">Mr.Lal (SG/LAL)</option>
+                    <option value="SG/SIT">Mr.Sithumina (SG/SIT)</option>
+                    <option value="SG/CHE">Mr.Cheethiya (SG/CHE)</option>
+                    <option value="SG/DIN">Mr.Kandy Uncle (SG/DIN)</option>
+                    <option value="SG/GAY">Mr.Gayan -Deraniyagala (SG/GAY)</option>
+                    <option value="SG/NAL">Mr.Naleen (Peoples Bank) (SG/NAL)</option>
+                    <option value="SG/KAL">Mrs. Kalani (SG/KAL)</option>
+                    <option value="SG/MTH">Mr.Meril and Thushara (SG/MTH)</option>
+                  </select>
                 </div>
                 
                 <div className="pt-4 flex gap-3">

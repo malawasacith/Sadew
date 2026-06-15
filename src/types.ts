@@ -17,6 +17,10 @@ export interface Gem {
   createdAt: number;
   updatedAt: number;
   status?: 'available' | 'on_sale' | 'sold';
+  basicColour?: string;
+  tradeColor?: string;
+  cutGrade?: 'Very good' | 'Good' | 'Ok' | '';
+  supplier?: string;
 }
 
 export interface StoreSettings {
@@ -43,6 +47,14 @@ export interface StoreSettings {
   fontFamily?: string;
   storePassword?: string;
   adminPassword?: string;
+  
+  // Email Settings
+  emailMethod?: 'self_hosted' | 'user_client';
+  smtpHost?: string;
+  smtpPort?: string;
+  smtpUser?: string;
+  smtpPassword?: string;
+  smtpFrom?: string;
 }
 
 export enum OperationType {

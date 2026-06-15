@@ -17,6 +17,7 @@ export function GemDetails() {
   const { settings } = useStoreSettings();
   const [isInquiryOpen, setIsInquiryOpen] = useState(false);
   const [inquiryForm, setInquiryForm] = useState({ name: '', phone: '', itemName: '', offeringPrice: '', message: '' });
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     const fetchGem = async () => {
@@ -72,7 +73,7 @@ export function GemDetails() {
   if (gem.images) {
     gem.images.forEach(img => {
       if (img !== gem.imageUrl) {
-        const isVideo = img.startsWith('data:video') || img.match(/\.(mp4|webm|ogg)$/i);
+        const isVideo = img.startsWith('data:video') || img.match(/\.(mp4|webm|ogg)$/i) || img.includes('/video');
         allMedia.push({ type: isVideo ? 'video' : 'image', url: img });
       }
     });
@@ -80,8 +81,9 @@ export function GemDetails() {
 
   const handleInquirySubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setIsSubmitting(true);
     try {
-      // Save to Firebase just in case
+      // Save to Firebase
       await addDoc(collection(db, 'inquiries'), {
         gemId: gem.id,
         gemName: gem.name,
@@ -92,23 +94,54 @@ export function GemDetails() {
         message: inquiryForm.message,
         createdAt: Date.now()
       });
+
+      // Try sending email via API if settings are configured
+      if (settings?.emailMethod === 'self_hosted' && settings?.smtpHost && settings?.smtpUser) {
+        const destEmail = settings?.inquiryEmail || settings?.contactEmail || settings?.smtpUser;
+        const subject = `New Inquiry: ${gem.name} (${gem.id})`;
+        const text = `Name: ${inquiryForm.name}\n` +
+          `Phone: ${inquiryForm.phone}\n` +
+          `Item Name: ${inquiryForm.itemName || gem.name}\n` +
+          `Offering Price: ${inquiryForm.offeringPrice ? '$' + inquiryForm.offeringPrice : 'N/A'}\n\n` +
+          `Message:\n${inquiryForm.message}`;
+
+        await fetch('/api/send-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            smtpHost: settings.smtpHost,
+            smtpPort: settings.smtpPort,
+            smtpUser: settings.smtpUser,
+            smtpPassword: settings.smtpPassword,
+            smtpFrom: settings.smtpFrom,
+            to: destEmail,
+            subject,
+            text
+          }),
+        });
+      } else {
+        // Fallback to mailto
+        const destEmail = settings?.inquiryEmail || settings?.contactEmail || 'mailto@example.com';
+        const subject = encodeURIComponent(`Inquiry about Gem: ${gem.name} (${gem.id})`);
+        const body = encodeURIComponent(
+          `Name: ${inquiryForm.name}\n` +
+          `Phone: ${inquiryForm.phone}\n` +
+          `Item Name: ${inquiryForm.itemName || gem.name}\n` +
+          `Offering Price: ${inquiryForm.offeringPrice ? '$' + inquiryForm.offeringPrice : 'N/A'}\n\n` +
+          `Message:\n${inquiryForm.message}`
+        );
+        window.open(`mailto:${destEmail}?subject=${subject}&body=${body}`, '_blank');
+      }
+
+      alert("Your inquiry has been successfully sent. We will contact you soon.");
+      setIsInquiryOpen(false);
+      setInquiryForm({ name: '', phone: '', itemName: '', offeringPrice: '', message: '' });
     } catch (err) {
       console.error('Failed to save inquiry', err);
+      alert("Something went wrong while sending your inquiry. Please try again later.");
+    } finally {
+      setIsSubmitting(false);
     }
-    
-    // Open email client
-    const destEmail = settings?.inquiryEmail || settings?.contactEmail || 'mailto@example.com';
-    const subject = encodeURIComponent(`Inquiry about Gem: ${gem.name} (${gem.id})`);
-    const body = encodeURIComponent(
-      `Name: ${inquiryForm.name}\n` +
-      `Phone: ${inquiryForm.phone}\n` +
-      `Item Name: ${inquiryForm.itemName || gem.name}\n` +
-      `Offering Price: ${inquiryForm.offeringPrice ? '$' + inquiryForm.offeringPrice : 'N/A'}\n\n` +
-      `Message:\n${inquiryForm.message}`
-    );
-    window.location.href = `mailto:${destEmail}?subject=${subject}&body=${body}`;
-    setIsInquiryOpen(false);
-    setInquiryForm({ name: '', phone: '', itemName: '', offeringPrice: '', message: '' });
   };
 
   return (
@@ -210,6 +243,24 @@ export function GemDetails() {
                     <dt className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">Dimensions</dt>
                     <dd className="text-sm text-slate-900 font-medium bg-slate-50 px-3 py-2 rounded-md border border-slate-100">{gem.dimensions}</dd>
                   </div>
+                  {gem.basicColour && (
+                    <div>
+                      <dt className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">Basic Colour</dt>
+                      <dd className="text-sm text-slate-900 font-medium bg-slate-50 px-3 py-2 rounded-md border border-slate-100">{gem.basicColour}</dd>
+                    </div>
+                  )}
+                  {gem.tradeColor && (
+                    <div>
+                      <dt className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">Trade Color</dt>
+                      <dd className="text-sm text-slate-900 font-medium bg-slate-50 px-3 py-2 rounded-md border border-slate-100">{gem.tradeColor}</dd>
+                    </div>
+                  )}
+                  {gem.cutGrade && (
+                    <div className="sm:col-span-2">
+                      <dt className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">Cut Grade</dt>
+                      <dd className="text-sm text-slate-900 font-medium bg-slate-50 px-3 py-2 rounded-md border border-slate-100">{gem.cutGrade}</dd>
+                    </div>
+                  )}
                 </dl>
               </div>
 
@@ -304,12 +355,14 @@ export function GemDetails() {
                 ></textarea>
               </div>
               <div className="pt-2">
-                <Button type="submit" className="w-full gap-2">
-                  <Mail className="h-4 w-4" /> Send Email
+                <Button type="submit" disabled={isSubmitting} className="w-full gap-2">
+                  <Mail className="h-4 w-4" /> {isSubmitting ? 'Sending...' : 'Send Email'}
                 </Button>
-                <p className="text-xs text-center text-slate-500 mt-3">
-                  This will open your default email client to send the inquiry.
-                </p>
+                {!settings?.smtpHost && (
+                  <p className="text-xs text-center text-slate-500 mt-3">
+                    This will open your default email client to send the inquiry.
+                  </p>
+                )}
               </div>
             </form>
           </div>

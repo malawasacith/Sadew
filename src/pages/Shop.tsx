@@ -309,7 +309,7 @@ export function Shop() {
                       const firstMedia = gem.imageUrl || (gem.images && gem.images.length > 0 ? gem.images[0] : null);
                       
                       if (firstMedia) {
-                        const isVideo = firstMedia.startsWith('data:video') || firstMedia.match(/\.(mp4|webm|ogg)$/i);
+                        const isVideo = firstMedia.startsWith('data:video') || firstMedia.match(/\.(mp4|webm|ogg)$/i) || firstMedia.includes('/video');
                         if (isVideo) {
                           return (
                             <div className="w-full h-full bg-black relative">
@@ -386,9 +386,12 @@ export function Shop() {
               ))}
               </div>
               {displayCount < filteredAndSortedGems.length && (
-                <div className="flex justify-center pt-8">
+                <div className="flex justify-center pt-8 gap-4">
                   <Button variant="outline" onClick={() => setDisplayCount(prev => prev + 4)}>
                     Load More
+                  </Button>
+                  <Button variant="outline" onClick={() => setDisplayCount(filteredAndSortedGems.length)}>
+                    Load All
                   </Button>
                 </div>
               )}
