@@ -1,5 +1,5 @@
 {
-  "name": "Lumina Gem Inventory",
+  "name": "lumina-gem-inventory",
   "description": "A secure, password-protected supplier gem inventory and client storefront.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

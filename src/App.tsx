@@ -42,7 +42,6 @@ export default function App() {
   return (
     <AuthProvider>
       <GlobalSettings />
-      <div id="debug-app-loaded" style={{ position: 'absolute', top: 0, left: 0, zIndex: 9999, background: 'green', color: 'white', padding: '10px' }}>App Component Rendered!</div>
       <Router>
         <Routes>
           <Route path="/" element={
